@@ -1,5 +1,6 @@
 package com.info7255.medicalplan.controller;
 
+import com.info7255.medicalplan.service.MedicalPlanService;
 import com.info7255.medicalplan.util.JsonSchemaValidator;
 import org.everit.json.schema.ValidationException;
 import org.json.JSONException;
@@ -20,20 +21,31 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping(path = "/medicalplan")
 public class MedicalPlanController {
     @Autowired
-    JsonSchemaValidator validator;
+    MedicalPlanService medicalPlanService ;
+
+    @Autowired
+    JsonSchemaValidator jsonSchemaValidator;
 
     @PostMapping(path = "/plan/", produces = "application/json")
-    public ResponseEntity<Object> createPlan(@RequestBody String plan, @RequestHeader HttpHeaders headers)
-            throws JSONException, Exception {
+    public ResponseEntity<Object> createMedicalPlan(@RequestBody String plan, @RequestHeader HttpHeaders headers)
+            throws Exception {
         if (plan == null || plan.isEmpty()) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body(new JSONObject().put("Error", "Empty medical plan received!").toString());
         }
 
-        JSONObject jsonObject = new JSONObject(plan);
+        JSONObject jsonObject;
         try {
-            validator.validateJson(jsonObject);
+            jsonObject = new JSONObject(plan);
+        } catch (JSONException jsonException) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(new JSONObject().put("Error", "Illegal Json data received!").toString());
+        }
+
+        try {
+            jsonSchemaValidator.validateJson(jsonObject);
         } catch (ValidationException validationException) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
@@ -43,10 +55,19 @@ public class MedicalPlanController {
         }
 
         String key = jsonObject.get("objectType").toString() + "_" + jsonObject.get("objectId").toString();
+        if(medicalPlanService.existsKey(key)){
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(new JSONObject()
+                            .put("Message", "Medical plan already exists!")
+                            .toString());
+        }
+
+        String newEtag = medicalPlanService.savePlanToRedis(jsonObject, key);
 
         return ResponseEntity
                 .ok()
-                .eTag("newEtag")
+                .eTag(newEtag)
                 .body(" {\"message\": \"Successfully created medical plan with key: " + key);
     }
 }
