@@ -19,40 +19,110 @@ import java.util.*;
 @Service
 public class MedicalPlanService {
     private final static String ETAG_KEY_NAME = "eTag";
+    private static final String PRE_ID_DELIMITER = ":";
+    private static final String PRE_FIELD_DELIMITER = ">>";
+    private static final String REDIS_ALL_PATTERN = "*";
+    private static final String OBJECT_TYPE_NAME = "objectType";
+    private static final String OBJECT_ID_MAME = "objectId";
 
     @Autowired
     MedicalPlanDAO medicalPlanDAO;
 
-    public String savePlanToRedis(JSONObject planObject, String key) {
-        Map<String, Object> saveMedicalPlanMap = saveMedicalPlan(key, planObject);
+    public String saveMedicalPlan(JSONObject planObject, String key) {
+        Map<String, Object> saveMedicalPlanMap = saveMedicalPlanToRedis(key, planObject);
+
         String saveMedicalPlanString = new JSONObject(saveMedicalPlanMap).toString();
         String newEtag = DigestUtils.md5DigestAsHex(saveMedicalPlanString.getBytes(StandardCharsets.UTF_8));
         medicalPlanDAO.hSet(key, ETAG_KEY_NAME, newEtag);
+
         return newEtag;
     }
 
-    public Map<String, Object> saveMedicalPlan(String key, JSONObject planObject){
-        convertJSONObjectToMap(planObject);
+    public Map<String, Object> saveMedicalPlanToRedis(String key, JSONObject planObject){
+        saveJSONObjectToRedis(planObject);
+        return getMedicalPlan(key);
+    }
+
+    public Map<String, Object> getMedicalPlan(String redisKey) {
         Map<String, Object> outputMap = new HashMap<>();
-        getOrDeleteData(key, outputMap, false);
+
+        Set<String> keys = medicalPlanDAO.getKeysByPattern(redisKey + REDIS_ALL_PATTERN);
+        for (String key : keys) {
+            if (key.equals(redisKey)) {
+                Map<String, String> value = medicalPlanDAO.hGetAll(key);
+                for (String name : value.keySet()) {
+                    if (!name.equalsIgnoreCase(ETAG_KEY_NAME)) {
+                        outputMap.put(name,
+                                isDouble(value.get(name)) ? Double.parseDouble(value.get(name)) : value.get(name));
+                    }
+                }
+            } else {
+                String newKey = key.substring((redisKey + PRE_FIELD_DELIMITER).length());
+                Set<String> members = medicalPlanDAO.sMembers(key);
+                if (members.size() > 1) {
+                    List<Object> listObj = new ArrayList<>();
+                    for (String member : members) {
+                        listObj.add(getMedicalPlan(member));
+                    }
+                    outputMap.put(newKey, listObj);
+                } else {
+                    Map<String, String> val = medicalPlanDAO.hGetAll(members.iterator().next());
+                    Map<String, Object> newMap = new HashMap<>();
+                    for (String name : val.keySet()) {
+                        newMap.put(name,
+                                isDouble(val.get(name)) ? Double.parseDouble(val.get(name)) : val.get(name));
+                    }
+                    outputMap.put(newKey, newMap);
+                }
+            }
+        }
+
         return outputMap;
     }
 
-    private Map<String, Map<String, Object>> convertJSONObjectToMap(JSONObject object) {
+    public void deleteMedicalPlan(String redisKey) {
+        Set<String> keys = medicalPlanDAO.getKeysByPattern(redisKey + REDIS_ALL_PATTERN);
+        for (String key : keys) {
+            if (key.equals(redisKey)) {
+                medicalPlanDAO.deleteKeys(new String[] {key});
+            } else {
+                Set<String> members = medicalPlanDAO.sMembers(key);
+                if (members.size() > 1) {
+                    for (String member : members) {
+                        deleteMedicalPlan(member);
+                    }
+                    medicalPlanDAO.deleteKeys(new String[] {key});
+                } else {
+                    medicalPlanDAO.deleteKeys(new String[]{members.iterator().next(), key});
+                }
+            }
+        }
+    }
+
+    public boolean existsRedisKey(String key){
+        return medicalPlanDAO.existsKey(key);
+    }
+
+    public String getMedicalPlanEtag(String key) {
+        return medicalPlanDAO.hGet(key, ETAG_KEY_NAME);
+    }
+
+    private Map<String, Map<String, Object>> saveJSONObjectToRedis(JSONObject object) {
         Map<String, Map<String, Object>> redisKeyMap = new HashMap<>();
         Map<String, Object> objectFieldMap = new HashMap<>();
 
-        String redisKey = object.get("objectType") + "_" + object.get("objectId");
+        String redisKey = object.get(OBJECT_TYPE_NAME) + PRE_ID_DELIMITER + object.get(OBJECT_ID_MAME);
         for (String field : object.keySet()) {
             Object value = object.get(field);
             if (value instanceof JSONObject) {
-                Map<String, Map<String, Object>> convertedValue = convertJSONObjectToMap((JSONObject) value);
-                medicalPlanDAO.sadd(redisKey + "_" + field, convertedValue.entrySet().iterator().next().getKey());
+                Map<String, Map<String, Object>> convertedValue = saveJSONObjectToRedis((JSONObject) value);
+                medicalPlanDAO.sadd(redisKey + PRE_FIELD_DELIMITER + field,
+                        convertedValue.entrySet().iterator().next().getKey());
             } else if (value instanceof JSONArray) {
-                List<Map<String, Map<String, Object>>> convertedValue = convertJSONArrayToList((JSONArray) value);
+                List<Map<String, Map<String, Object>>> convertedValue = saveJSONArrayToRedis((JSONArray) value);
                 for (Map<String, Map<String, Object>> entry : convertedValue) {
                     for (String listKey : entry.keySet()) {
-                        medicalPlanDAO.sadd(redisKey + "_" + field, listKey);
+                        medicalPlanDAO.sadd(redisKey + PRE_FIELD_DELIMITER + field, listKey);
                     }
                 }
             } else {
@@ -61,77 +131,23 @@ public class MedicalPlanService {
                 redisKeyMap.put(redisKey, objectFieldMap);
             }
         }
+
         return redisKeyMap;
     }
 
-    private List<Map<String, Map<String, Object>>> convertJSONArrayToList(JSONArray array) {
+    private List<Map<String, Map<String, Object>>> saveJSONArrayToRedis(JSONArray array) {
         List<Map<String, Map<String, Object>>> list = new ArrayList<>();
         for (int i = 0; i < array.length(); i++) {
             Object value = array.get(i);
             if (value instanceof JSONArray) {
-                List<Map<String, Map<String, Object>>> convertedValue = convertJSONArrayToList((JSONArray) value);
+                List<Map<String, Map<String, Object>>> convertedValue = saveJSONArrayToRedis((JSONArray) value);
                 list.addAll(convertedValue);
             } else if (value instanceof JSONObject) {
-                Map<String, Map<String, Object>> convertedValue = convertJSONObjectToMap((JSONObject) value);
+                Map<String, Map<String, Object>> convertedValue = saveJSONObjectToRedis((JSONObject) value);
                 list.add(convertedValue);
             }
         }
         return list;
-    }
-
-    private Map<String, Object> getOrDeleteData(String redisKey, Map<String, Object> outputMap, boolean isDelete) {
-        Set<String> keys = medicalPlanDAO.getKeysByPattern(redisKey + "*");
-        for (String key : keys) {
-            if (key.equals(redisKey)) {
-                if (isDelete) {
-                    medicalPlanDAO.deleteKeys(new String[] {key});
-                } else {
-                    Map<String, String> val = medicalPlanDAO.hGetAll(key);
-                    for (String name : val.keySet()) {
-                        if (!name.equalsIgnoreCase(ETAG_KEY_NAME)) {
-                            outputMap.put(name,
-                                    isDouble(val.get(name)) ? Double.parseDouble(val.get(name)) : val.get(name));
-                        }
-                    }
-                }
-            } else {
-                String newStr = key.substring((redisKey + "_").length());
-                Set<String> members = medicalPlanDAO.sMembers(key);
-                if (members.size() > 1) {
-                    List<Object> listObj = new ArrayList<>();
-                    for (String member : members) {
-                        if (isDelete) {
-                            getOrDeleteData(member, null, true);
-                        } else {
-                            Map<String, Object> listMap = new HashMap<>();
-                            listObj.add(getOrDeleteData(member, listMap, false));
-                        }
-                    }
-                    if (isDelete) {
-                        medicalPlanDAO.deleteKeys(new String[] {key});
-                    } else {
-                        outputMap.put(newStr, listObj);
-                    }
-                } else {
-                    if (isDelete) {
-                        medicalPlanDAO.deleteKeys(new String[]{members.iterator().next(), key});
-                    } else {
-                        Map<String, String> val = medicalPlanDAO.hGetAll(members.iterator().next());
-                        Map<String, Object> newMap = new HashMap<>();
-                        for (String name : val.keySet()) {
-                            newMap.put(name,
-                                    isDouble(val.get(name)) ? Double.parseDouble(val.get(name)) : val.get(name));
-                        }
-                        outputMap.put(newStr, newMap);
-                    }
-                }
-            }
-        }
-        return outputMap;
-    }
-
-    public boolean existsKey(String key){
-        return medicalPlanDAO.existsKey(key);
     }
 
     private boolean isDouble(String s) {
