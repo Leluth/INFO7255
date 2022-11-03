@@ -1,5 +1,6 @@
 package com.info7255.medicalplan.controller;
 
+import com.info7255.medicalplan.service.AuthorizationService;
 import com.info7255.medicalplan.service.MedicalPlanService;
 import com.info7255.medicalplan.util.JsonSchemaValidator;
 import org.everit.json.schema.ValidationException;
@@ -33,6 +34,28 @@ public class MedicalPlanController {
 
     @Autowired
     JsonSchemaValidator jsonSchemaValidator;
+
+    @Autowired
+    private AuthorizationService authorizationService;
+
+    @GetMapping(value = "/token")
+    public ResponseEntity<String> getToken() {
+        String token = authorizationService.getToken();
+        return new ResponseEntity<>(token, HttpStatus.CREATED);
+    }
+
+    @PostMapping(value = "/token")
+    public ResponseEntity<String> verifyToken(@RequestHeader HttpHeaders headers) {
+        String errorMessage = authorizationService.verifyToken(headers);
+        if (errorMessage != null) {
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(new JSONObject().put("Error: ", errorMessage).toString());
+        }
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(" {\"Message\": \"Token verified!" + "\"}");
+    }
 
     @PostMapping(path = "/plan/", produces = "application/json")
     public ResponseEntity<Object> createMedicalPlan(@RequestBody String plan, @RequestHeader HttpHeaders headers)
