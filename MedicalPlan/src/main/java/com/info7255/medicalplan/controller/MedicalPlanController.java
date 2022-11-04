@@ -27,6 +27,7 @@ public class MedicalPlanController {
     private static final String OBJECT_TYPE_NAME = "objectType";
     private static final String OBJECT_ID_MAME = "objectId";
     private static final String IF_NONE_MATCH_HEADER = "If-None-Match";
+    private static final String IF_MATCH_HEADER = "If-Match";
     private static final String PRE_ID_DELIMITER = ":";
 
     @Autowired
@@ -60,6 +61,13 @@ public class MedicalPlanController {
     @PostMapping(path = "/plan/", produces = "application/json")
     public ResponseEntity<Object> createMedicalPlan(@RequestBody String plan, @RequestHeader HttpHeaders headers)
             throws Exception {
+        String errorMessage = authorizationService.verifyToken(headers);
+        if (errorMessage != null) {
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(new JSONObject().put("Error: ", errorMessage).toString());
+        }
+
         if (plan == null || plan.isEmpty()) {
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
@@ -85,7 +93,9 @@ public class MedicalPlanController {
                             .toString());
         }
 
-        String key = jsonObject.get(OBJECT_TYPE_NAME).toString() + PRE_ID_DELIMITER + jsonObject.get(OBJECT_ID_MAME).toString();
+        String key = jsonObject.get(OBJECT_TYPE_NAME).toString()
+                + PRE_ID_DELIMITER
+                + jsonObject.get(OBJECT_ID_MAME).toString();
         if(medicalPlanService.existsRedisKey(key)){
             return ResponseEntity
                     .status(HttpStatus.CONFLICT)
@@ -105,6 +115,13 @@ public class MedicalPlanController {
     @GetMapping(path = "/{objectType}/{objectId}", produces = "application/json")
     public ResponseEntity<Object> getPlan(@RequestHeader HttpHeaders headers, @PathVariable String objectId,
                                           @PathVariable String objectType) {
+        String errorMessage = authorizationService.verifyToken(headers);
+        if (errorMessage != null) {
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(new JSONObject().put("Error: ", errorMessage).toString());
+        }
+
         String redisKey = objectType + PRE_ID_DELIMITER + objectId;
         if (!medicalPlanService.existsRedisKey(redisKey)) {
             return ResponseEntity
@@ -133,7 +150,14 @@ public class MedicalPlanController {
     }
 
     @DeleteMapping(path = "/plan/{objectId}", produces = "application/json")
-    public ResponseEntity<Object> getPlan(@RequestHeader HttpHeaders headers, @PathVariable String objectId){
+    public ResponseEntity<Object> getPlan(@RequestHeader HttpHeaders headers, @PathVariable String objectId) {
+        String errorMessage = authorizationService.verifyToken(headers);
+        if (errorMessage != null) {
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(new JSONObject().put("Error: ", errorMessage).toString());
+        }
+
         String redisKey = MEDICAL_PLAN_OBJECT_TYPE + PRE_ID_DELIMITER + objectId;
         if (!medicalPlanService.existsRedisKey(redisKey)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -147,5 +171,46 @@ public class MedicalPlanController {
         return ResponseEntity
                 .noContent()
                 .build();
+    }
+
+    @PatchMapping(path = "/plan/{objectId}", produces = "application/json")
+    public ResponseEntity<Object> patchPlan(@RequestHeader HttpHeaders headers, @RequestBody String medicalPlan,
+                                            @PathVariable String objectId) {
+        String errorMessage = authorizationService.verifyToken(headers);
+        if (errorMessage != null) {
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(new JSONObject().put("Error: ", errorMessage).toString());
+        }
+
+        JSONObject jsonObject;
+        try {
+            jsonObject = new JSONObject(medicalPlan);
+        } catch (JSONException jsonException) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(new JSONObject().put("Error", "Illegal Json data received!").toString());
+        }
+
+        String redisKey = MEDICAL_PLAN_OBJECT_TYPE + PRE_ID_DELIMITER + objectId;
+        if (!medicalPlanService.existsRedisKey(redisKey)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new JSONObject().put("Message", "ObjectId does not exist").toString());
+        }
+
+        String receivedETag = headers.getFirst(IF_MATCH_HEADER);
+        String actualEtag = medicalPlanService.getMedicalPlanEtag(redisKey);
+        if (receivedETag != null && !receivedETag.equals(actualEtag)) {
+            return ResponseEntity
+                    .status(HttpStatus.PRECONDITION_FAILED)
+                    .eTag(actualEtag)
+                    .build();
+        }
+
+        String newEtag = medicalPlanService.saveMedicalPlan(jsonObject, redisKey);
+        return ResponseEntity
+                .ok()
+                .eTag(newEtag)
+                .body(new JSONObject().put("Message: ", "Successfully updated medical plan!").toString());
     }
 }
