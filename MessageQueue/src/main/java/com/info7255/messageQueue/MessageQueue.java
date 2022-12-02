@@ -63,7 +63,7 @@ public class MessageQueue {
             try {
                 if (operation.equals(MESSAGE_QUEUE_POST_OPERATION)) {
                     JSONObject plan = new JSONObject(message);
-                    String postResult = postDocument(plan, null, INDEX_NAME);
+                    String postResult = postDocument(plan, null, null, INDEX_NAME);
                     System.out.println("Finish a post job! Result: " + postResult + "\n");
                 } else {
                     String deleteResult = deleteDocument(message);
@@ -91,7 +91,9 @@ public class MessageQueue {
     }
 
     private static String postDocument(JSONObject jsonObject,
-                                       String parentDocumentId, String name) throws IOException {
+                                       String parentDocumentId,
+                                       String ancestorDocumentId,
+                                       String name) throws IOException {
         StringBuilder response = new StringBuilder();
         if (jsonObject == null) {
             return response.toString();
@@ -102,8 +104,10 @@ public class MessageQueue {
         IndexRequest request = new IndexRequest(INDEX_NAME);
         request.id(documentId);
         request.source(document.toString(), XContentType.JSON);
-        if (parentDocumentId != null) {
-            request.routing(parentDocumentId);
+        if (ancestorDocumentId != null) {
+            request.routing(ancestorDocumentId);
+        } else {
+            ancestorDocumentId = documentId;
         }
         IndexResponse indexResponse = ES_CLIENT.index(request, RequestOptions.DEFAULT);
         response.append(documentId)
@@ -116,24 +120,28 @@ public class MessageQueue {
                 response.append(postDocument(
                         (JSONObject) jsonObject.get(PLAN_COST_SHARES_NAME),
                         documentId,
+                        ancestorDocumentId,
                         PLAN_COST_SHARES_NAME));
             }
             if (LINKED_SERVICE_NAME.equals(key)) {
                 response.append(postDocument(
                         (JSONObject) jsonObject.get(LINKED_SERVICE_NAME),
                         documentId,
+                        ancestorDocumentId,
                         LINKED_SERVICE_NAME));
             }
             if (PLAN_SERVICE_COST_SHARES_NAME.equals(key)) {
                 response.append(postDocument(
                         (JSONObject) jsonObject.get(PLAN_SERVICE_COST_SHARES_NAME),
                         documentId,
+                        ancestorDocumentId,
                         PLAN_SERVICE_COST_SHARES_NAME));
             }
             if (LINKED_PLAN_SERVICES_NAME.equals(key)) {
                 response.append(generateLinkedPlanServices(
                         jsonObject.get(LINKED_PLAN_SERVICES_NAME),
-                        documentId));
+                        documentId,
+                        ancestorDocumentId));
             }
         }
 
@@ -148,7 +156,8 @@ public class MessageQueue {
     }
 
     private static String generateLinkedPlanServices(Object linkedPlanServices,
-                                                     String parentDocumentId) throws IOException {
+                                                     String parentDocumentId,
+                                                     String ancestorDocumentId) throws IOException {
         StringBuilder response = new StringBuilder();
         if (!(linkedPlanServices instanceof JSONArray)) {
             return response.toString();
@@ -156,7 +165,11 @@ public class MessageQueue {
 
         JSONArray jsonArray = (JSONArray) linkedPlanServices;
         for (Object jsonObject : jsonArray) {
-            response.append(postDocument((JSONObject) jsonObject, parentDocumentId, LINKED_PLAN_SERVICES_NAME));
+            response.append(postDocument(
+                    (JSONObject) jsonObject,
+                    parentDocumentId,
+                    ancestorDocumentId,
+                    LINKED_PLAN_SERVICES_NAME));
         }
 
         return response.toString();
