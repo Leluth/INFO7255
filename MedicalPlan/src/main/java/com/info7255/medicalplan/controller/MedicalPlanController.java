@@ -165,6 +165,15 @@ public class MedicalPlanController {
                             .toString());
         }
 
+        String receivedETag = headers.getFirst(IF_MATCH_HEADER);
+        String actualEtag = medicalPlanService.getMedicalPlanEtag(redisKey);
+        if (receivedETag != null && !receivedETag.equals(actualEtag)) {
+            return ResponseEntity
+                    .status(HttpStatus.PRECONDITION_FAILED)
+                    .eTag(actualEtag)
+                    .build();
+        }
+
         medicalPlanService.deleteMedicalPlan(redisKey);
         // send delete plan message to MQ
         messageQueueService.publish(objectId, MESSAGE_QUEUE_DELETE_OPERATION);
