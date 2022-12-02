@@ -1,0 +1,50 @@
+#Delete all
+DELETE /medical-plan
+
+#Get all
+GET medical-plan/_search
+{
+  "query": {
+    "match_all": {}
+  }
+}
+
+
+#Get plan
+GET medical-plan/_search
+{
+  "query":{
+    "match": {
+      "objectId": "12xvxc345ssdsds-508"
+    }
+  }
+}
+
+
+#Has child
+GET medical-plan/_search
+{
+  "query": {
+    "has_child": {
+      "type": "planserviceCostShares",
+      "query": {
+        "match_all": {}
+      }
+    }
+  }
+}
+
+
+#Has parent
+GET medical-plan/_search
+{
+  "query": {
+    "has_parent": {
+      "parent_type": "medical-plan"
+      "query": {
+        "match_all": {}
+      }
+    }
+  }
+}
+
