@@ -10,6 +10,8 @@ import org.springframework.util.DigestUtils;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
+import static com.info7255.medicalplan.Constants.Constants.*;
+
 /**
  * @author Shaoshuai Xu
  * @version 1.0
@@ -18,27 +20,25 @@ import java.util.*;
  */
 @Service
 public class MedicalPlanService {
-    private final static String ETAG_KEY_NAME = "eTag";
-    private static final String PRE_ID_DELIMITER = ":";
-    private static final String PRE_FIELD_DELIMITER = ">>";
-    private static final String REDIS_ALL_PATTERN = "*";
-    private static final String OBJECT_TYPE_NAME = "objectType";
-    private static final String OBJECT_ID_MAME = "objectId";
-
     @Autowired
     MedicalPlanDAO medicalPlanDAO;
 
+    @Autowired
+    private MessageQueueService messageQueueService;
+
     public String saveMedicalPlan(JSONObject planObject, String key) {
         Map<String, Object> saveMedicalPlanMap = saveMedicalPlanToRedis(key, planObject);
-
         String saveMedicalPlanString = new JSONObject(saveMedicalPlanMap).toString();
+
+        // send save plan message to MQ
+        messageQueueService.publish(saveMedicalPlanString, MESSAGE_QUEUE_POST_OPERATION);
+
         String newEtag = DigestUtils.md5DigestAsHex(saveMedicalPlanString.getBytes(StandardCharsets.UTF_8));
         medicalPlanDAO.hSet(key, ETAG_KEY_NAME, newEtag);
-
         return newEtag;
     }
 
-    public Map<String, Object> saveMedicalPlanToRedis(String key, JSONObject planObject){
+    public Map<String, Object> saveMedicalPlanToRedis(String key, JSONObject planObject) {
         saveJSONObjectToRedis(planObject);
         return getMedicalPlan(key);
     }
@@ -56,7 +56,7 @@ public class MedicalPlanService {
                                 isDouble(value.get(name)) ? Double.parseDouble(value.get(name)) : value.get(name));
                     }
                 }
-            } else {
+            } else if (!MESSAGE_QUEUE_NAME.equals(key) && !WORKING_QUEUE_NAME.equals(key)) {
                 String newKey = key.substring((redisKey + PRE_FIELD_DELIMITER).length());
                 Set<String> members = medicalPlanDAO.sMembers(key);
                 if (members.size() > 1) {
@@ -84,14 +84,14 @@ public class MedicalPlanService {
         Set<String> keys = medicalPlanDAO.getKeysByPattern(redisKey + REDIS_ALL_PATTERN);
         for (String key : keys) {
             if (key.equals(redisKey)) {
-                medicalPlanDAO.deleteKeys(new String[] {key});
+                medicalPlanDAO.deleteKeys(new String[]{key});
             } else {
                 Set<String> members = medicalPlanDAO.sMembers(key);
                 if (members.size() > 1) {
                     for (String member : members) {
                         deleteMedicalPlan(member);
                     }
-                    medicalPlanDAO.deleteKeys(new String[] {key});
+                    medicalPlanDAO.deleteKeys(new String[]{key});
                 } else {
                     medicalPlanDAO.deleteKeys(new String[]{members.iterator().next(), key});
                 }
@@ -99,7 +99,7 @@ public class MedicalPlanService {
         }
     }
 
-    public boolean existsRedisKey(String key){
+    public boolean existsRedisKey(String key) {
         return medicalPlanDAO.existsKey(key);
     }
 

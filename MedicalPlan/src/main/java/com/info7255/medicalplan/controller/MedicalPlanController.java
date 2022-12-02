@@ -2,6 +2,7 @@ package com.info7255.medicalplan.controller;
 
 import com.info7255.medicalplan.service.AuthorizationService;
 import com.info7255.medicalplan.service.MedicalPlanService;
+import com.info7255.medicalplan.service.MessageQueueService;
 import com.info7255.medicalplan.util.JsonSchemaValidator;
 import org.everit.json.schema.ValidationException;
 import org.json.JSONException;
@@ -14,6 +15,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+import static com.info7255.medicalplan.Constants.Constants.*;
+
 /**
  * @author Shaoshuai Xu
  * @version 1.0
@@ -23,21 +26,17 @@ import java.util.Map;
 @RestController
 @RequestMapping(path = "/medicalplan")
 public class MedicalPlanController {
-    private static final String MEDICAL_PLAN_OBJECT_TYPE = "plan";
-    private static final String OBJECT_TYPE_NAME = "objectType";
-    private static final String OBJECT_ID_MAME = "objectId";
-    private static final String IF_NONE_MATCH_HEADER = "If-None-Match";
-    private static final String IF_MATCH_HEADER = "If-Match";
-    private static final String PRE_ID_DELIMITER = ":";
-
     @Autowired
-    MedicalPlanService medicalPlanService ;
+    MedicalPlanService medicalPlanService;
 
     @Autowired
     JsonSchemaValidator jsonSchemaValidator;
 
     @Autowired
     private AuthorizationService authorizationService;
+
+    @Autowired
+    private MessageQueueService messageQueueService;
 
     @GetMapping(value = "/token")
     public ResponseEntity<String> getToken() {
@@ -96,7 +95,7 @@ public class MedicalPlanController {
         String key = jsonObject.get(OBJECT_TYPE_NAME).toString()
                 + PRE_ID_DELIMITER
                 + jsonObject.get(OBJECT_ID_MAME).toString();
-        if(medicalPlanService.existsRedisKey(key)){
+        if (medicalPlanService.existsRedisKey(key)) {
             return ResponseEntity
                     .status(HttpStatus.CONFLICT)
                     .body(new JSONObject()
@@ -113,8 +112,8 @@ public class MedicalPlanController {
     }
 
     @GetMapping(path = "/{objectType}/{objectId}", produces = "application/json")
-    public ResponseEntity<Object> getPlan(@RequestHeader HttpHeaders headers, @PathVariable String objectId,
-                                          @PathVariable String objectType) {
+    public ResponseEntity<Object> getMedicalPlan(@RequestHeader HttpHeaders headers, @PathVariable String objectId,
+                                                 @PathVariable String objectType) {
         String errorMessage = authorizationService.verifyToken(headers);
         if (errorMessage != null) {
             return ResponseEntity
@@ -150,7 +149,7 @@ public class MedicalPlanController {
     }
 
     @DeleteMapping(path = "/plan/{objectId}", produces = "application/json")
-    public ResponseEntity<Object> getPlan(@RequestHeader HttpHeaders headers, @PathVariable String objectId) {
+    public ResponseEntity<Object> deleteMedicalPlan(@RequestHeader HttpHeaders headers, @PathVariable String objectId) {
         String errorMessage = authorizationService.verifyToken(headers);
         if (errorMessage != null) {
             return ResponseEntity
@@ -167,6 +166,8 @@ public class MedicalPlanController {
         }
 
         medicalPlanService.deleteMedicalPlan(redisKey);
+        // send delete plan message to MQ
+        messageQueueService.publish(objectId, MESSAGE_QUEUE_DELETE_OPERATION);
 
         return ResponseEntity
                 .noContent()

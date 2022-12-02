@@ -9,9 +9,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.RequestHeader;
 
-import java.security.*;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+
+import static com.info7255.medicalplan.Constants.Constants.*;
 
 /**
  * @author Shaoshuai Xu
@@ -21,9 +25,6 @@ import java.security.interfaces.RSAPublicKey;
  */
 @Service
 public class AuthorizationService {
-    private final static int RSA_KEY_BASE_SIZE = 1024;
-    private final static String TOKEN_HEADER = "Authorization";
-    private final static String TOKEN_FORMAT = "Bearer ";
     private final Algorithm algorithm;
     private final JWTVerifier verifier;
 
@@ -43,7 +44,7 @@ public class AuthorizationService {
         try {
             return JWT.create()
                     .sign(algorithm);
-        } catch (JWTCreationException exception){
+        } catch (JWTCreationException exception) {
             return null;
         }
     }
@@ -60,7 +61,7 @@ public class AuthorizationService {
 
         try {
             verifier.verify(token);
-        } catch (JWTVerificationException exception){
+        } catch (JWTVerificationException exception) {
             return "Token is expired or invalid!";
         }
 

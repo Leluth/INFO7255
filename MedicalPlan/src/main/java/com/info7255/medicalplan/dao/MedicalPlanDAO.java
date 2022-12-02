@@ -6,6 +6,9 @@ import redis.clients.jedis.JedisPooled;
 import java.util.Map;
 import java.util.Set;
 
+import static com.info7255.medicalplan.Constants.Constants.PORT;
+import static com.info7255.medicalplan.Constants.Constants.REDIS_URL;
+
 /**
  * @author Shaoshuai Xu
  * @version 1.0
@@ -14,8 +17,6 @@ import java.util.Set;
  */
 @Repository
 public class MedicalPlanDAO {
-    private final static String REDIS_URL = "localhost";
-    private final static int PORT = 6379;
     private final JedisPooled jedis = new JedisPooled(REDIS_URL, PORT);
 
     public void sadd(String key, String value) {
@@ -36,6 +37,10 @@ public class MedicalPlanDAO {
 
     public Map<String, String> hGetAll(String key) {
         return jedis.hgetAll(key);
+    }
+
+    public void lpush(String key, String value) {
+        jedis.lpush(key, value);
     }
 
     public boolean existsKey(String key) {
